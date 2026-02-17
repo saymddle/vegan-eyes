@@ -1,65 +1,104 @@
-import Image from "next/image";
+"use client";
+import React, { useState, useRef } from 'react';
+import { Camera, Search, Loader2, RefreshCw, CheckCircle2, AlertCircle, HelpCircle } from 'lucide-react';
+import { createWorker } from 'tesseract.js';
 
-export default function Home() {
+export default function VeganEyes() {
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [result, setResult] = useState<any>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImageScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsScanning(true);
+    setLoading(true);
+    try {
+      const worker = await createWorker('eng');
+      const { data: { text } } = await worker.recognize(file);
+      await worker.terminate();
+      setInput(text.replace(/\s+/g, ' ').trim().toLowerCase());
+    } catch (err) {
+      alert("Scan failed. Try manual entry.");
+    } finally {
+      setIsScanning(false);
+      setLoading(false);
+    }
+  };
+
+  const checkIngredients = async () => {
+    if (!input) return;
+    setLoading(true);
+    setResult(null);
+    try {
+      const res = await fetch('/api/check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ingredients: input }),
+      });
+      const data = await res.json();
+      setResult(data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <main className="min-h-screen bg-[#F8FAFC] flex flex-col items-center p-6 max-w-md mx-auto font-sans">
+      <header className="w-full py-8 text-center">
+        <h1 className="text-3xl font-black text-emerald-600 tracking-tighter italic">VEGAN EYES</h1>
+        <div className="h-1 w-12 bg-emerald-600 mx-auto rounded-full mt-1"></div>
+      </header>
+
+      <div className="w-full space-y-5">
+        <input type="file" accept="image/*" capture="environment" className="hidden" ref={fileInputRef} onChange={handleImageScan} />
+
+        <div className="relative group">
+          <textarea 
+            className="w-full p-5 h-44 rounded-[2rem] border-none bg-white shadow-xl shadow-emerald-900/5 focus:ring-4 focus:ring-emerald-500/10 outline-none transition-all text-zinc-800 placeholder:text-zinc-400 text-base"
+            placeholder="Scan or paste ingredients list..."
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+          />
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+
+        <div className="flex gap-3">
+          <button 
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isScanning}
+            className="flex-1 flex items-center justify-center gap-2 bg-white border-2 border-zinc-100 py-4 rounded-2xl font-bold text-zinc-600 active:scale-95 transition-all"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+            {isScanning ? <RefreshCw className="animate-spin" /> : <Camera size={20} />} Scan
+          </button>
+          
+          <button 
+            onClick={checkIngredients}
+            disabled={loading || !input}
+            className="flex-[2] flex items-center justify-center gap-2 bg-emerald-600 text-white py-4 rounded-2xl font-bold active:scale-95 transition-all shadow-lg shadow-emerald-600/20 disabled:opacity-50"
           >
-            Documentation
-          </a>
+            {loading ? <Loader2 className="animate-spin" /> : <Search size={20} />} Check Ingredients
+          </button>
         </div>
-      </main>
-    </div>
+
+        {result && (
+          <div className={`mt-4 p-8 rounded-[2.5rem] text-white shadow-2xl animate-in zoom-in-95 duration-300 ${
+            result.status === 'vegan' ? 'bg-emerald-500' : 
+            result.status === 'non_vegan' ? 'bg-rose-500' : 'bg-amber-500'
+          }`}>
+            <div className="flex items-center gap-3 mb-3">
+              {result.status === 'vegan' && <CheckCircle2 size={32} />}
+              {result.status === 'non_vegan' && <AlertCircle size={32} />}
+              {result.status === 'maybe_vegan' && <HelpCircle size={32} />}
+              <h2 className="text-3xl font-black uppercase tracking-tighter">{result.status.replace('_', ' ')}</h2>
+            </div>
+            <p className="text-sm font-semibold opacity-90 leading-snug">{result.explanation}</p>
+          </div>
+        )}
+      </div>
+    </main>
   );
 }
