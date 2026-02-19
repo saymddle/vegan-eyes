@@ -16,8 +16,7 @@ export async function POST(req: Request) {
     const { ingredients } = await req.json();
     const cleanRawText = (ingredients as string).trim();
     
-    // 1. Check Product Memory (Cache) first
-    // Note: We now select the new intelligence columns
+    // Check Cache
     const { data: existingProduct } = await supabase
       .from('products')
       .select('*')
@@ -25,87 +24,56 @@ export async function POST(req: Request) {
       .single();
 
     if (existingProduct) {
-      return NextResponse.json({ 
-        ...existingProduct,
-        status: existingProduct.vegan_status, 
-        flagged: existingProduct.flagged_ingredients, 
-        cached: true 
-      });
+      return NextResponse.json({ ...existingProduct, status: existingProduct.vegan_status, flagged: existingProduct.flagged_ingredients, cached: true });
     }
 
-    // 2. Clean and Parse Ingredients
-    const fullList = cleanRawText
-      .toLowerCase()
-      .replace(/[():.;\[\]*]/g, ',')
-      .split(',')
-      .map((i: string) => i.trim())
-      .filter((i: string) => i.length > 2);
+    const fullList = cleanRawText.toLowerCase().replace(/[():.;\[\]*]/g, ',').split(',').map((i: string) => i.trim()).filter((i: string) => i.length > 2);
 
-    // 3. Fetch Deep Intelligence from Supabase
-    // We fetch the "Why", "How", and "Nourishment" data
-    const { data: dbIngredients } = await supabase
-      .from('ingredients')
-      .select('name, vegan_status, function_logic, nourishment_fact, vegan_substitute, sub_reasoning, is_composite, components')
-      .in('name', fullList);
-
-    const knownNames = dbIngredients?.map(i => i.name) || [];
-    const unknownIngredients = fullList.filter(i => !knownNames.includes(i));
+    const { data: dbIngredients } = await supabase.from('ingredients').select('*').in('name', fullList);
 
     let finalFlaggedItems = dbIngredients?.filter((i: any) => i.vegan_status !== 'vegan') || [];
     let status = finalFlaggedItems.some(i => i.vegan_status === 'non_vegan') ? 'non_vegan' : 'vegan';
 
-    // 4. AI Fallback for Unknowns
+    const unknownIngredients = fullList.filter(i => !(dbIngredients?.map(d => d.name) || []).includes(i));
+
     if (unknownIngredients.length > 0) {
       const response = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [
-          { role: "system", content: "You are a vegan food scientist. Analyze ingredients and return ONLY JSON." },
-          { role: "user", content: `Analyze: ${unknownIngredients.join(', ')}. Return: {"is_vegan": boolean, "maybe": boolean, "flagged": [{"name": "item", "reason": "why", "function": "what it does", "nourishment": "health fact"}], "explanation": "short summary"}` }
+          { role: "system", content: "You are a vegan food scientist. You must be binary: Vegan or Non-Vegan. If text is gibberish/unreadable, return {'error': 'unclear'}. Otherwise, return JSON." },
+          { role: "user", content: `Analyze: ${unknownIngredients.join(', ')}. Return: {"is_vegan": boolean, "flagged": [{"name": "item", "reason": "why", "function": "what it does", "nourishment": "fact"}]}` }
         ],
         response_format: { type: "json_object" }
       });
 
       const aiJson = JSON.parse(response.choices[0].message.content || '{}');
+      if (aiJson.error) return NextResponse.json({ status: 'unclear', explanation: "Text unclear. Please scan the ingredient list on the back of the package." });
 
-      if (!aiJson.is_vegan || aiJson.maybe) {
-        status = aiJson.maybe ? 'maybe_vegan' : 'non_vegan';
-        
-        // Map AI response to match our Deep Intelligence DB structure
-        const aiFlaggedFormatted = aiJson.flagged.map((f: any) => ({
+      if (!aiJson.is_vegan) {
+        status = 'non_vegan';
+        const aiFlagged = aiJson.flagged.map((f: any) => ({
           name: f.name,
-          vegan_status: aiJson.maybe ? 'maybe_vegan' : 'non_vegan',
+          vegan_status: 'non_vegan',
           function_logic: f.function || 'Unknown',
-          nourishment_fact: f.nourishment || 'No specific nourishment data available.',
+          nourishment_fact: f.nourishment || 'N/A',
           sub_reasoning: f.reason
         }));
-        
-        finalFlaggedItems = [...finalFlaggedItems, ...aiFlaggedFormatted];
+        finalFlaggedItems = [...finalFlaggedItems, ...aiFlagged];
       }
     }
 
-    const flaggedNames = [...new Set(finalFlaggedItems.map(f => f.name))];
-    const explanation = flaggedNames.length > 0 
-      ? `Analysis complete. Found ${flaggedNames.length} items to review.`
-      : "All ingredients appear to be vegan and nourishing.";
+    const explanation = status === 'non_vegan' ? `Flagged ${finalFlaggedItems.length} items.` : "All items appear vegan.";
 
-    // 5. Save to Memory for future users
-    // We store the rich flagged data so the cache is just as "smart" as a live scan
     await supabase.from('products').insert({
       ingredient_text: cleanRawText,
       vegan_status: status,
-      flagged_ingredients: finalFlaggedItems, // Saving the full objects
+      flagged_ingredients: finalFlaggedItems,
       explanation: explanation
     });
 
-    return NextResponse.json({ 
-      status, 
-      flagged: finalFlaggedItems, 
-      explanation, 
-      cached: false 
-    });
+    return NextResponse.json({ status, flagged: finalFlaggedItems, explanation, cached: false });
     
   } catch (error) {
-    console.error("API Error:", error);
     return NextResponse.json({ error: 'Check failed' }, { status: 500 });
   }
 }

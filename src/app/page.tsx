@@ -63,8 +63,8 @@ export default function VeganEyes() {
         <div className="relative">
           <textarea 
             className="w-full p-5 h-40 rounded-3xl border-2 border-zinc-50 bg-white shadow-sm focus:border-emerald-500/20 focus:ring-4 focus:ring-emerald-500/5 outline-none transition-all text-zinc-800 placeholder:text-zinc-300 text-base resize-none"
-            placeholder="Scan or paste ingredients list..."
-            value={input}
+            placeholder="Tip: Scan the ingredient list on the back!"
+            value={input ? "✅ Ingredients Captured" : ""}
             onChange={(e) => setInput(e.target.value)}
           />
           {input && (
