@@ -5,44 +5,40 @@ export async function POST(req: Request) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-  // 1. Log configuration status to Vercel Logs
-  if (!supabaseUrl || !supabaseKey) {
-    console.error("LAB ERROR: Environment variables are missing in Vercel settings.");
-    return NextResponse.json({ 
-      status: 'error', 
-      explanation: 'Database connection not configured in Vercel.' 
-    }, { status: 500 });
-  }
+  if (!supabaseUrl || !supabaseKey) return NextResponse.json({ status: 'error' }, { status: 500 });
 
   try {
     const supabase = createClient(supabaseUrl, supabaseKey);
     const { ingredients } = await req.json();
     
-    // 2. Normalize input
+    // NOISE FILTER: Strip out non-ingredient words to find the core noun
+    const noiseWords = ['serves', 'filling', 'pound', 'lb', 'cup', 'tsp', 'tbsp', 'grated', 'melted', 'large', 'small', 'of', 'and'];
+    
     const ingredientList = ingredients
       .toLowerCase()
-      .split(/[,\n]/)
-      .map((i: string) => i.replace(/^[0-9\s/./]+(cup|tbsp|tsp|oz|g|ml|lb|qty)?\s+/i, '').trim())
-      .filter((i: string) => i.length > 0);
+      .split(/[,\n;>]/) // Split by common delimiters
+      .map((line: string) => {
+        let cleaned = line.replace(/[0-9./]/g, '').trim(); // Remove numbers
+        noiseWords.forEach(word => {
+          const regex = new RegExp(`\\b${word}\\b`, 'g');
+          cleaned = cleaned.replace(regex, '');
+        });
+        return cleaned.trim();
+      })
+      .filter((i: string) => i.length > 1);
 
-    // 3. Query Database
     const { data: foundItems, error } = await supabase
       .from('ingredients')
-      .select('name, vegan_status, nourishment_fact, difficulty_weight, swap_static, swap_functional, is_complex')
+      .select('*')
       .in('name', ingredientList);
 
-    if (error) {
-      console.error("DATABASE ERROR:", error.message);
-      throw error;
-    }
+    if (error) throw error;
 
     const flagged = foundItems?.filter(item => item.vegan_status === 'non_vegan') || [];
     let status = flagged.length > 0 ? 'non_vegan' : (foundItems?.length === 0 ? 'unclear' : 'vegan');
 
     return NextResponse.json({ status, flagged });
-
   } catch (error: any) {
-    console.error('SYSTEM CRASH:', error.message);
-    return NextResponse.json({ status: 'error', details: error.message }, { status: 500 });
+    return NextResponse.json({ status: 'error' }, { status: 500 });
   }
 }
