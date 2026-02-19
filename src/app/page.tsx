@@ -23,6 +23,25 @@ export default function VeganEyes() {
     return measurements.some(m => text.toLowerCase().includes(m));
   };
 
+  const handleImageScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsScanning(true);
+    setLoading(true);
+    try {
+      const worker = await createWorker('eng');
+      const { data: { text } } = await worker.recognize(file);
+      await worker.terminate();
+      setInput(text.replace(/\s+/g, ' ').trim());
+      setToast(detectContext(text) ? "Recipe Mode Active" : "Product Scan Complete");
+    } catch (err) {
+      setToast("Scan failed.");
+    } finally {
+      setIsScanning(false);
+      setLoading(false);
+    }
+  };
+
   const checkIngredients = async () => {
     if (!input) return;
     setLoading(true);
@@ -70,9 +89,27 @@ export default function VeganEyes() {
         </div>
 
         <div className="flex gap-3 pb-4">
-          <button className="flex-1 flex items-center justify-center gap-2 bg-zinc-50 py-4 rounded-2xl font-bold text-zinc-500"><Camera size={20} /> Scan</button>
-          <button onClick={checkIngredients} className="flex-[2] flex items-center justify-center gap-2 bg-emerald-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-emerald-200">
-            {loading ? <Loader2 className="animate-spin" /> : <><Search size={20} /> Check</>}
+          {/* FIXED SCAN BUTTON */}
+          <input 
+            type="file" 
+            accept="image/*" 
+            capture="environment" 
+            className="hidden" 
+            ref={fileInputRef} 
+            onChange={handleImageScan} 
+          />
+          <button 
+            onClick={() => fileInputRef.current?.click()}
+            className="flex-1 flex items-center justify-center gap-2 bg-zinc-50 py-4 rounded-2xl font-bold text-zinc-500 active:scale-95 transition-transform"
+          >
+            {isScanning ? <Loader2 className="animate-spin" size={20} /> : <Camera size={20} />} Scan
+          </button>
+
+          <button 
+            onClick={checkIngredients} 
+            className="flex-[2] flex items-center justify-center gap-2 bg-emerald-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-emerald-200 active:scale-95 transition-transform"
+          >
+            {loading && !isScanning ? <Loader2 className="animate-spin" /> : <><Search size={20} /> Check</>}
           </button>
         </div>
 
