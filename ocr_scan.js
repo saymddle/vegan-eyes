@@ -9,14 +9,23 @@ const config = {
 
 const client = new Mistral({ apiKey: config.mistralKey });
 
-// Clean the AI's response in case it wraps it in ```json blocks
-function cleanJSONResponse(rawString) {
-  return rawString.replace(/```json|```/g, "").trim();
+// --- NEW: HISTORY SAVER ---
+function saveToHistory(ingredients, results) {
+  const historyPath = 'history.json';
+  let history = [];
+  if (fs.existsSync(historyPath)) {
+    history = JSON.parse(fs.readFileSync(historyPath));
+  }
+  history.push({
+    date: new Date().toISOString(),
+    scan: ingredients,
+    results: results
+  });
+  fs.writeFileSync(historyPath, JSON.stringify(history, null, 2));
+  console.log("💾 Scan saved to local history.");
 }
 
 async function checkVeganStatus(ingredients) {
-  console.log("🔍 Consulting the database...");
-  
   const response = await fetch(`${config.supabaseUrl}/rest/v1/rpc/check_vegan_status`, {
     method: 'POST',
     headers: {
@@ -26,55 +35,38 @@ async function checkVeganStatus(ingredients) {
     },
     body: JSON.stringify({ search_terms: ingredients })
   });
-
-  const results = await response.json();
-  
-  console.log("\n--- VEGAN EYES REPORT ---");
-  if (!results || results.length === 0) {
-    console.log("No matches found in the database.");
-  } else {
-    results.forEach(item => {
-      const icon = item.status === 'vegan' ? '✅' : (item.status === 'non_vegan' ? '❌' : '⚠️');
-      console.log(`${icon} ${item.found_term.padEnd(20)} -> ${item.ingredient_name.toUpperCase()} (${item.status})`);
-      if (item.note) console.log(`   💡 Note: ${item.note}`);
-    });
-  }
-  console.log("------------------------\n");
+  return await response.json();
 }
 
 async function scanAndCheck(imagePath) {
   try {
     const base64Image = fs.readFileSync(imagePath, { encoding: 'base64' });
-
-    console.log("👁️  Mistral is looking at the label...");
     const chatResponse = await client.chat.complete({
       model: 'pixtral-12b-2409',
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: 'List every ingredient on this label. Output ONLY a valid JSON object with the key "ingredients".' },
-            { type: 'image_url', imageUrl: `data:image/jpeg;base64,${base64Image}` }
-          ]
-        }
-      ],
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'List every ingredient. Output ONLY a JSON object with key "ingredients".' },
+          { type: 'image_url', imageUrl: `data:image/jpeg;base64,${base64Image}` }
+        ]
+      }],
       response_format: { type: 'json_object' }
     });
 
-    const rawContent = chatResponse.choices[0].message.content;
-    const cleanedContent = cleanJSONResponse(rawContent);
-    const ocrData = JSON.parse(cleanedContent);
+    const ocrData = JSON.parse(chatResponse.choices[0].message.content.replace(/```json|```/g, ""));
+    const results = await checkVeganStatus(ocrData.ingredients);
+    
+    // Display results
+    results.forEach(item => {
+      console.log(`${item.status === 'vegan' ? '✅' : '❌'} ${item.found_term}`);
+    });
 
-    await checkVeganStatus(ocrData.ingredients);
+    // Save for the History/Favorites feature
+    saveToHistory(ocrData.ingredients, results);
 
   } catch (err) {
-    console.error("❌ Error:", err.message);
+    console.error("Error:", err.message);
   }
 }
 
-const imagePath = process.argv[2];
-if (!imagePath) {
-  console.error("Usage: node ocr_scan.js <image_path>");
-} else {
-  scanAndCheck(imagePath);
-}
+scanAndCheck(process.argv[2]);
