@@ -9,22 +9,6 @@ const config = {
 
 const client = new Mistral({ apiKey: config.mistralKey });
 
-// --- NEW: HISTORY SAVER ---
-function saveToHistory(ingredients, results) {
-  const historyPath = 'history.json';
-  let history = [];
-  if (fs.existsSync(historyPath)) {
-    history = JSON.parse(fs.readFileSync(historyPath));
-  }
-  history.push({
-    date: new Date().toISOString(),
-    scan: ingredients,
-    results: results
-  });
-  fs.writeFileSync(historyPath, JSON.stringify(history, null, 2));
-  console.log("💾 Scan saved to local history.");
-}
-
 async function checkVeganStatus(ingredients) {
   const response = await fetch(`${config.supabaseUrl}/rest/v1/rpc/check_vegan_status`, {
     method: 'POST',
@@ -35,7 +19,48 @@ async function checkVeganStatus(ingredients) {
     },
     body: JSON.stringify({ search_terms: ingredients })
   });
-  return await response.json();
+
+  const results = await response.json();
+  
+  const vegan = [];
+  const nonVegan = [];
+  const unsure = [];
+
+  results.forEach(item => {
+    if (item.status === 'vegan') vegan.push(item);
+    else if (item.status === 'non_vegan') nonVegan.push(item);
+    else unsure.push(item);
+  });
+
+  console.log("\n===========================================");
+  console.log("             VEGAN EYES REPORT             ");
+  console.log("===========================================\n");
+
+  if (nonVegan.length > 0) {
+    console.log("❌ NOT VEGAN");
+    nonVegan.forEach(item => {
+      console.log(` • ${item.found_term.toUpperCase()}`);
+      console.log(`   └─ Alternative: ${item.substitute || "No common substitute found"}`);
+    });
+    console.log("");
+  }
+
+  if (unsure.length > 0) {
+    console.log("⚠️  UNSURE (GRAY AREA)");
+    unsure.forEach(item => {
+      console.log(` • ${item.found_term.toUpperCase()}`);
+      console.log(`   └─ Why: ${item.note || "Source varies by manufacturer"}`);
+    });
+    console.log("");
+  }
+
+  if (vegan.length > 0) {
+    console.log("✅ VEGAN INGREDIENTS");
+    console.log(` ${vegan.map(v => v.found_term).join(", ")}`);
+    console.log("");
+  }
+  
+  console.log("===========================================\n");
 }
 
 async function scanAndCheck(imagePath) {
@@ -46,24 +71,15 @@ async function scanAndCheck(imagePath) {
       messages: [{
         role: 'user',
         content: [
-          { type: 'text', text: 'List every ingredient. Output ONLY a JSON object with key "ingredients".' },
+          { type: 'text', text: 'Extract all ingredients from this label. Output ONLY a JSON object with a key "ingredients" containing an array of strings.' },
           { type: 'image_url', imageUrl: `data:image/jpeg;base64,${base64Image}` }
         ]
       }],
       response_format: { type: 'json_object' }
     });
 
-    const ocrData = JSON.parse(chatResponse.choices[0].message.content.replace(/```json|```/g, ""));
-    const results = await checkVeganStatus(ocrData.ingredients);
-    
-    // Display results
-    results.forEach(item => {
-      console.log(`${item.status === 'vegan' ? '✅' : '❌'} ${item.found_term}`);
-    });
-
-    // Save for the History/Favorites feature
-    saveToHistory(ocrData.ingredients, results);
-
+    const ocrData = JSON.parse(chatResponse.choices[0].message.content.replace(/```json|```/g, "").trim());
+    await checkVeganStatus(ocrData.ingredients);
   } catch (err) {
     console.error("Error:", err.message);
   }
